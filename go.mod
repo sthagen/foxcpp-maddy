@@ -11,10 +11,9 @@ require (
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
 	github.com/digitalocean/godo v1.69.1 // indirect
-	github.com/emersion/go-imap v1.2.0
+	github.com/emersion/go-imap v1.2.1-0.20220119134953-dcd9ee65c8c7
 	github.com/emersion/go-imap-appendlimit v0.0.0-20210907172056-e3baed77bbe4
 	github.com/emersion/go-imap-compress v0.0.0-20201103190257-14809af1d1b9
-	github.com/emersion/go-imap-idle v0.0.0-20210907174914-db2568431445
 	github.com/emersion/go-imap-move v0.0.0-20210907172020-fe4558f9c872
 	github.com/emersion/go-imap-sortthread v1.2.0
 	github.com/emersion/go-imap-specialuse v0.0.0-20201101201809-1ab93d3d150e
@@ -23,7 +22,7 @@ require (
 	github.com/emersion/go-milter v0.3.2
 	github.com/emersion/go-msgauth v0.6.5
 	github.com/emersion/go-sasl v0.0.0-20211008083017-0b9dcfb154ac
-	github.com/emersion/go-smtp v0.15.1-0.20211006082444-62f6b38f85e4
+	github.com/emersion/go-smtp v0.15.1-0.20220119142625-1c322d2783aa
 	github.com/foxcpp/go-dovecot-sasl v0.0.0-20200522223722-c4699d7a24bf
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200617132817-958ea5829771
 	github.com/foxcpp/go-imap-i18nlevel v0.0.0-20200208001533-d6ec88553005
