@@ -1,4 +1,5 @@
-//+build integration,cgo,!nosqlite3
+//go:build integration && cgo && !nosqlite3
+// +build integration,cgo,!nosqlite3
 
 /*
 Maddy Mail Server - Composable all-in-one email server.
@@ -94,6 +95,7 @@ func TestImapsqlDelivery(tt *testing.T) {
 
 	imapConn.Writeln(". NOOP")
 	imapConn.ExpectPattern(`\* 1 EXISTS`)
+	imapConn.ExpectPattern(`\* 1 RECENT`)
 	imapConn.ExpectPattern(". OK *")
 
 	imapConn.Writeln(". FETCH 1 (BODY.PEEK[])")
@@ -180,6 +182,7 @@ func TestImapsqlDeliveryMap(tt *testing.T) {
 
 	imapConn.Writeln(". NOOP")
 	imapConn.ExpectPattern(`\* 1 EXISTS`)
+	imapConn.ExpectPattern(`\* 1 RECENT`)
 	imapConn.ExpectPattern(". OK *")
 }
 
@@ -251,5 +254,6 @@ func TestImapsqlAuthMap(tt *testing.T) {
 
 	imapConn.Writeln(". NOOP")
 	imapConn.ExpectPattern(`\* 1 EXISTS`)
+	imapConn.ExpectPattern(`\* 1 RECENT`)
 	imapConn.ExpectPattern(". OK *")
 }

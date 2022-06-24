@@ -1,4 +1,5 @@
-//+build cover_main
+//go:build cover_main
+// +build cover_main
 
 /*
 Maddy Mail Server - Composable all-in-one email server.
@@ -36,15 +37,16 @@ https://github.com/albertito/chasquid/blob/master/coverage_test.go
 */
 
 import (
+	"flag"
 	"os"
 	"testing"
 
 	"github.com/foxcpp/maddy"
+	"github.com/urfave/cli/v2"
 )
 
 func TestMain(m *testing.M) {
-	// -test.* flags are registered somewhere in init() in "testing" (?)
-	// so calling flag.Parse() in maddy.Run() catches them up.
+	// -test.* flags are registered somewhere in init() in "testing" (?).
 
 	// maddy.Run changes the working directory, we need to change it back so
 	// -test.coverprofile writes out profile in the right location.
@@ -53,7 +55,16 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	code := maddy.Run()
+	flag.Parse()
+
+	app := cli.NewApp()
+	// maddycli wrapper registers all necessary flags with flag.CommandLine by default
+	ctx := cli.NewContext(app, flag.CommandLine, nil)
+	err = maddy.Run(ctx)
+	code := 0
+	if ec, ok := err.(cli.ExitCoder); ok {
+		code = ec.ExitCode()
+	}
 
 	if err := os.Chdir(wd); err != nil {
 		panic(err)

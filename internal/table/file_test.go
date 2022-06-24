@@ -66,7 +66,8 @@ func TestReadFile(t *testing.T) {
 	test(`"a @ a"@example.org: b@example.com`, map[string][]string{`"a @ a"@example.org`: {"b@example.com"}})
 	test(`a@example.org: "b @ b"@example.com`, map[string][]string{`a@example.org`: {`"b @ b"@example.com`}})
 	test(`"a @ a": "b @ b"`, map[string][]string{`"a @ a"`: {`"b @ b"`}})
-	test("a: b, c", map[string][]string{"a": {"b, c"}})
+	test("a: b, c", map[string][]string{"a": {"b", "c"}})
+	test("a: b\na: c", map[string][]string{"a": {"b", "c"}})
 	test(": b", nil)
 	test(":", nil)
 	test("aaa", map[string][]string{"aaa": {""}})
@@ -111,7 +112,7 @@ func TestFileReload(t *testing.T) {
 	}
 
 	// This delay is somehow important. Not sure why.
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	if err := ioutil.WriteFile(f.Name(), []byte("dog: cat"), os.ModePerm); err != nil {
 		t.Fatal(err)

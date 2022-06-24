@@ -119,11 +119,11 @@ func (f *File) reloader() {
 	}()
 
 	t := time.NewTicker(reloadInterval)
+	defer t.Stop()
 
 	for {
 		select {
 		case <-t.C:
-			var latestStamp time.Time
 			info, err := os.Stat(f.file)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -133,10 +133,10 @@ func (f *File) reloader() {
 					f.mLck.Unlock()
 					continue
 				}
-				f.log.Printf("%v", err)
+				f.log.Error("os stat", err)
 			}
-			if info.ModTime().After(latestStamp) {
-				latestStamp = info.ModTime()
+			if info.ModTime().Before(f.mStamp) {
+				continue // reload not necessary
 			}
 		case <-f.forceReload:
 		case <-f.stopReloader:
@@ -203,9 +203,11 @@ func readFile(path string, out map[string][]string) error {
 		if len(from) == 0 {
 			return parseErr("empty address before colon")
 		}
-		to := strings.TrimSpace(parts[1])
 
-		out[from] = append(out[from], to)
+		for _, to := range strings.Split(parts[1], ",") {
+			to := strings.TrimSpace(to)
+			out[from] = append(out[from], to)
+		}
 	}
 	return scnr.Err()
 }
