@@ -281,6 +281,18 @@ func (c *C) attemptConnect(ctx context.Context, lmtp bool, endp config.Endpoint,
 		return false, nil, nil, TLSError{err}
 	}
 
+	// Re-do HELO using our hostname instead of localhost.
+	if err := cl.Hello(c.Hostname); err != nil {
+		cl.Close()
+
+		var tlsErr *tls.CertificateVerificationError
+		if errors.As(err, &tlsErr) {
+			return false, nil, nil, TLSError{Err: tlsErr}
+		}
+
+		return false, nil, nil, err
+	}
+
 	return true, cl, conn, nil
 }
 
@@ -518,7 +530,6 @@ func (c *C) Close() error {
 			c.Log.DebugMsg("QUIT error", "reason", c.wrapClientErr(err, c.serverName))
 		} else if errors.As(err, &netErr) &&
 			(netErr.Timeout() || netErr.Err.Error() == "write: broken pipe" || netErr.Err.Error() == "read: connection reset") {
-
 			// The case for silently closed connections.
 			c.Log.DebugMsg("QUIT error", "reason", c.wrapClientErr(err, c.serverName))
 		} else {

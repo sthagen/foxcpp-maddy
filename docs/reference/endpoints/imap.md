@@ -18,6 +18,7 @@ imap tcp://0.0.0.0:143 tls://0.0.0.0:993 {
     io_debug no
     debug no
     insecure_auth no
+    sasl_login no
     auth pam
     storage &local_mailboxes
     auth_map identity
@@ -40,6 +41,27 @@ tls cert.crt key.key {
 ```
 
 See [TLS configuration / Server](/reference/tls/#server-side) for details.
+
+---
+
+### proxy_protocol _trusted ips..._ { ... }
+Default: not enabled
+
+Enable use of HAProxy PROXY protocol. Supports both v1 and v2 protocols.
+If a list of trusted IP addresses or subnets is provided, only connections
+from those will be trusted.
+
+TLS for the channel between the proxies and maddy can be configured
+using a 'tls' directive:
+```
+proxy_protocol {
+    trust 127.0.0.1 ::1 192.168.0.1/24
+    tls &proxy_tls
+}
+```
+Note that the top-level 'tls' directive is not inherited here. If you
+need TLS on top of the PROXY protocol, securing the protocol header,
+you must declare TLS explicitly.
 
 ---
 
@@ -66,6 +88,16 @@ Enable verbose logging.
 
 ### insecure_auth _boolean_
 Default: `no` (`yes` if TLS is disabled)
+
+Allow plain-text authentication over unencrypted connections.
+
+---
+
+### sasl_login _boolean_
+Default: `no`
+
+Enable support for SASL LOGIN authentication mechanism used by
+some outdated clients.
 
 ---
 

@@ -16,26 +16,46 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-package smtpconn
+package milter
 
 import (
-	"flag"
-	"math/rand"
-	"os"
-	"strconv"
 	"testing"
+
+	"github.com/foxcpp/maddy/framework/config"
 )
 
-var testPort string
+func TestAcceptValidEndpoints(t *testing.T) {
+	for _, endpoint := range []string{
+		"tcp://0.0.0.0:10025",
+		"tcp://[::]:10025",
+		"tcp:127.0.0.1:10025",
+		"unix://path",
+		"unix:path",
+		"unix:/path",
+		"unix:///path",
+		"unix://also/path",
+		"unix:///also/path",
+	} {
+		c := &Check{milterUrl: endpoint}
 
-func TestMain(m *testing.M) {
-	remoteSmtpPort := flag.String("test.smtpport", "random", "(maddy) SMTP port to use for connections in tests")
-	flag.Parse()
-
-	if *remoteSmtpPort == "random" {
-		*remoteSmtpPort = strconv.Itoa(rand.Intn(65536-10000) + 10000)
+		err := c.Init(&config.Map{})
+		if err != nil {
+			t.Errorf("Unexpected failure for %s: %v", endpoint, err)
+			return
+		}
 	}
+}
 
-	testPort = *remoteSmtpPort
-	os.Exit(m.Run())
+func TestRejectInvalidEndpoints(t *testing.T) {
+	for _, endpoint := range []string{
+		"tls://0.0.0.0:10025",
+		"tls:0.0.0.0:10025",
+	} {
+		c := &Check{milterUrl: endpoint}
+		err := c.Init(&config.Map{})
+		if err == nil {
+			t.Errorf("Accepted invalid endpoint: %s", endpoint)
+			return
+		}
+	}
 }

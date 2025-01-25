@@ -44,14 +44,16 @@ import (
 	"github.com/foxcpp/maddy/framework/module"
 	"github.com/foxcpp/maddy/internal/auth"
 	"github.com/foxcpp/maddy/internal/authz"
+	"github.com/foxcpp/maddy/internal/proxy_protocol"
 	"github.com/foxcpp/maddy/internal/updatepipe"
 )
 
 type Endpoint struct {
-	addrs     []string
-	serv      *imapserver.Server
-	listeners []net.Listener
-	Store     module.Storage
+	addrs         []string
+	serv          *imapserver.Server
+	listeners     []net.Listener
+	proxyProtocol *proxy_protocol.ProxyProtocol
+	Store         module.Storage
 
 	tlsConfig   *tls.Config
 	listenersWg sync.WaitGroup
@@ -60,8 +62,6 @@ type Endpoint struct {
 
 	storageNormalize authz.NormalizeFunc
 	storageMap       module.Table
-	authNormalize    authz.NormalizeFunc
-	authMap          module.Table
 
 	Log log.Logger
 }
@@ -88,8 +88,10 @@ func (endp *Endpoint) Init(cfg *config.Map) error {
 	cfg.Callback("auth", func(m *config.Map, node config.Node) error {
 		return endp.saslAuth.AddProvider(m, node)
 	})
+	cfg.Bool("sasl_login", false, false, &endp.saslAuth.EnableLogin)
 	cfg.Custom("storage", false, true, nil, modconfig.StorageDirective, &endp.Store)
 	cfg.Custom("tls", true, true, nil, tls2.TLSDirective, &endp.tlsConfig)
+	cfg.Custom("proxy_protocol", false, false, nil, proxy_protocol.ProxyProtocolDirective, &endp.proxyProtocol)
 	cfg.Bool("insecure_auth", false, false, &insecureAuth)
 	cfg.Bool("io_debug", false, false, &ioDebug)
 	cfg.Bool("io_errors", false, false, &ioErrors)
@@ -98,8 +100,8 @@ func (endp *Endpoint) Init(cfg *config.Map) error {
 		&endp.storageNormalize)
 	modconfig.Table(cfg, "storage_map", false, false, nil, &endp.storageMap)
 	config.EnumMapped(cfg, "auth_map_normalize", true, false, authz.NormalizeFuncs, authz.NormalizeAuto,
-		&endp.authNormalize)
-	modconfig.Table(cfg, "auth_map", true, false, nil, &endp.authMap)
+		&endp.saslAuth.AuthNormalize)
+	modconfig.Table(cfg, "auth_map", true, false, nil, &endp.saslAuth.AuthMap)
 	if _, err := cfg.Process(); err != nil {
 		return err
 	}
@@ -136,12 +138,9 @@ func (endp *Endpoint) Init(cfg *config.Map) error {
 		return err
 	}
 
-	endp.saslAuth.AuthNormalize = endp.authNormalize
-	endp.saslAuth.AuthMap = endp.authMap
 	for _, mech := range endp.saslAuth.SASLMechanisms() {
-		mech := mech
 		endp.serv.EnableAuth(mech, func(c imapserver.Conn) sasl.Server {
-			return endp.saslAuth.CreateSASL(mech, c.Info().RemoteAddr, func(identity string) error {
+			return endp.saslAuth.CreateSASL(mech, c.Info().RemoteAddr, func(identity string, data auth.ContextData) error {
 				return endp.openAccount(c, identity)
 			})
 		})
@@ -167,10 +166,13 @@ func (endp *Endpoint) setupListeners(addresses []config.Endpoint) error {
 			l = tls.NewListener(l, endp.tlsConfig)
 		}
 
+		if endp.proxyProtocol != nil {
+			l = proxy_protocol.NewListener(l, endp.proxyProtocol, endp.Log)
+		}
+
 		endp.listeners = append(endp.listeners, l)
 
 		endp.listenersWg.Add(1)
-		addr := addr
 		go func() {
 			if err := endp.serv.Serve(l); err != nil && !strings.HasSuffix(err.Error(), "use of closed network connection") {
 				endp.Log.Printf("imap: failed to serve %s: %s", addr, err)
@@ -207,27 +209,6 @@ func (endp *Endpoint) Close() error {
 	}
 	endp.listenersWg.Wait()
 	return nil
-}
-
-func (endp *Endpoint) usernameForAuth(ctx context.Context, saslUsername string) (string, error) {
-	saslUsername, err := endp.authNormalize(saslUsername)
-	if err != nil {
-		return "", err
-	}
-
-	if endp.authMap == nil {
-		return saslUsername, nil
-	}
-
-	mapped, ok, err := endp.authMap.Lookup(ctx, saslUsername)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", imapbackend.ErrInvalidCredentials
-	}
-
-	return mapped, nil
 }
 
 func (endp *Endpoint) usernameForStorage(ctx context.Context, saslUsername string) (string, error) {
