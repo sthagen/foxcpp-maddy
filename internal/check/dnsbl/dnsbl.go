@@ -38,6 +38,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type ResponseRule struct {
+	Networks []net.IPNet
+	Score    int
+	Message  string
+}
+
 type List struct {
 	Zone string
 
@@ -49,6 +55,8 @@ type List struct {
 
 	ScoreAdj  int
 	Responses []net.IPNet
+
+	ResponseRules []ResponseRule
 }
 
 var defaultBL = List{
@@ -58,7 +66,6 @@ var defaultBL = List{
 type DNSBL struct {
 	instName   string
 	checkEarly bool
-	inlineBls  []string
 	bls        []List
 
 	quarantineThres int
@@ -68,10 +75,9 @@ type DNSBL struct {
 	log      log.Logger
 }
 
-func NewDNSBL(_, instName string, _, inlineArgs []string) (module.Module, error) {
+func New(_, instName string) (module.Module, error) {
 	return &DNSBL{
-		instName:  instName,
-		inlineBls: inlineArgs,
+		instName: instName,
 
 		resolver: dns.DefaultResolver(),
 		log:      log.Logger{Name: "dnsbl"},
@@ -86,7 +92,7 @@ func (bl *DNSBL) InstanceName() string {
 	return bl.instName
 }
 
-func (bl *DNSBL) Init(cfg *config.Map) error {
+func (bl *DNSBL) Configure(inlineArgs []string, cfg *config.Map) error {
 	cfg.Bool("debug", false, false, &bl.log.Debug)
 	cfg.Bool("check_early", false, false, &bl.checkEarly)
 	cfg.Int("quarantine_threshold", false, false, 1, &bl.quarantineThres)
@@ -97,7 +103,7 @@ func (bl *DNSBL) Init(cfg *config.Map) error {
 		return err
 	}
 
-	for _, inlineBl := range bl.inlineBls {
+	for _, inlineBl := range inlineArgs {
 		cfg := defaultBL
 		cfg.Zone = inlineBl
 		go bl.testList(cfg)
@@ -126,6 +132,14 @@ func (bl *DNSBL) readListCfg(node config.Node) error {
 	cfg.Bool("mailfrom", false, defaultBL.EHLO, &listCfg.MAILFROM)
 	cfg.Int("score", false, false, 1, &listCfg.ScoreAdj)
 	cfg.StringList("responses", false, false, []string{"127.0.0.1/24"}, &responseNets)
+	cfg.Callback("response", func(_ *config.Map, node config.Node) error {
+		rule, err := parseResponseRule(node)
+		if err != nil {
+			return err
+		}
+		listCfg.ResponseRules = append(listCfg.ResponseRules, rule)
+		return nil
+	})
 	if _, err := cfg.Process(); err != nil {
 		return err
 	}
@@ -142,6 +156,11 @@ func (bl *DNSBL) readListCfg(node config.Node) error {
 			return err
 		}
 		listCfg.Responses = append(listCfg.Responses, *ipNet)
+	}
+
+	// Warn if both response and responses are configured
+	if len(listCfg.ResponseRules) > 0 && len(responseNets) > 0 {
+		bl.log.Msg("both 'response' blocks and 'responses' directive are specified, 'response' blocks take precedence", "list", node.Name)
 	}
 
 	for _, zone := range append([]string{node.Name}, node.Args...) {
@@ -171,6 +190,44 @@ func (bl *DNSBL) readListCfg(node config.Node) error {
 	}
 
 	return nil
+}
+
+func parseResponseRule(node config.Node) (ResponseRule, error) {
+	var rule ResponseRule
+
+	if len(node.Args) == 0 {
+		return rule, config.NodeErr(node, "response block requires at least one IP address or CIDR as argument")
+	}
+
+	// Parse IP addresses/CIDRs from arguments
+	for _, arg := range node.Args {
+		// If there is no / - it is a plain IP address, append '/32' or '/128'
+		resp := arg
+		if !strings.Contains(resp, "/") {
+			// Check if it's IPv6 to determine the mask
+			if strings.Contains(resp, ":") {
+				resp += "/128"
+			} else {
+				resp += "/32"
+			}
+		}
+
+		_, ipNet, err := net.ParseCIDR(resp)
+		if err != nil {
+			return rule, config.NodeErr(node, "invalid IP address or CIDR: %s: %v", arg, err)
+		}
+		rule.Networks = append(rule.Networks, *ipNet)
+	}
+
+	// Parse directives within the response block
+	cfg := config.NewMap(nil, node)
+	cfg.Int("score", false, true, 0, &rule.Score)
+	cfg.String("message", false, false, "", &rule.Message)
+	if _, err := cfg.Process(); err != nil {
+		return rule, err
+	}
+
+	return rule, nil
 }
 
 func (bl *DNSBL) testList(listCfg List) {
@@ -298,6 +355,7 @@ func (bl *DNSBL) checkLists(ctx context.Context, ip net.IP, ehlo, mailFrom strin
 		score    int
 		listedOn []string
 		reasons  []string
+		messages []string
 	)
 
 	for _, list := range bl.bls {
@@ -313,7 +371,18 @@ func (bl *DNSBL) checkLists(ctx context.Context, ip net.IP, ehlo, mailFrom strin
 				defer lck.Unlock()
 				listedOn = append(listedOn, listErr.List)
 				reasons = append(reasons, listErr.Reason)
-				score += list.ScoreAdj
+
+				// Use score from ListedErr if set (new behavior), otherwise use legacy ScoreAdj
+				if listErr.Score != 0 {
+					score += listErr.Score
+				} else {
+					score += list.ScoreAdj
+				}
+
+				// Collect custom messages if available
+				if listErr.Message != "" {
+					messages = append(messages, listErr.Message)
+				}
 			}
 			return nil
 		})
@@ -334,13 +403,19 @@ func (bl *DNSBL) checkLists(ctx context.Context, ip net.IP, ehlo, mailFrom strin
 		}
 	}
 
+	// Use custom message if available, otherwise use default
+	message := "Client identity is listed in the used DNSBL"
+	if len(messages) > 0 {
+		message = strings.Join(messages, "; ")
+	}
+
 	if score >= bl.rejectThres {
 		return module.CheckResult{
 			Reject: true,
 			Reason: &exterrors.SMTPError{
 				Code:         554,
 				EnhancedCode: exterrors.EnhancedCode{5, 7, 0},
-				Message:      "Client identity is listed in the used DNSBL",
+				Message:      message,
 				Err:          err,
 				CheckName:    "dnsbl",
 			},
@@ -352,7 +427,7 @@ func (bl *DNSBL) checkLists(ctx context.Context, ip net.IP, ehlo, mailFrom strin
 			Reason: &exterrors.SMTPError{
 				Code:         554,
 				EnhancedCode: exterrors.EnhancedCode{5, 7, 0},
-				Message:      "Client identity is listed in the used DNSBL",
+				Message:      message,
 				Err:          err,
 				CheckName:    "dnsbl",
 			},
@@ -431,5 +506,5 @@ func (*state) Close() error {
 }
 
 func init() {
-	module.Register("check.dnsbl", NewDNSBL)
+	module.Register("check.dnsbl", New)
 }
