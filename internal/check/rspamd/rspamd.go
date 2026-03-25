@@ -92,7 +92,7 @@ func (c *Check) Configure(inlineArgs []string, cfg *config.Map) error {
 	}
 
 	var (
-		tlsConfig tls.Config
+		tlsConfig *tls.Config
 		flags     []string
 	)
 
@@ -135,7 +135,7 @@ func (c *Check) Configure(inlineArgs []string, cfg *config.Map) error {
 
 	c.client = &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig: &tlsConfig,
+			TLSClientConfig: tlsConfig,
 		},
 	}
 	c.flags = strings.Join(flags, ",")
@@ -277,7 +277,11 @@ func (s *state) CheckBody(ctx context.Context, hdr textproto.Header, body buffer
 			},
 		})
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			s.log.Error("failed to close response body", err)
+		}
+	}()
 
 	var respData response
 	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
